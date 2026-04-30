@@ -1,0 +1,14 @@
+resources:
+  - namespace.yaml
+  - config/configmap.yaml
+  - config/secret.yaml
+  - backend/deployment.yaml
+  - backend/service.yaml
+  - frontend/deployment.yaml
+  - frontend/service.yaml
+  - worker/deployment.yaml
+  - worker/service.yaml
+  - worker/hpa.yaml
+  - database/mongo.yaml
+  - database/redis.yaml
+  - ingress.yaml

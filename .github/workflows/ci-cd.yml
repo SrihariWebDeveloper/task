@@ -1,0 +1,89 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint frontend and backend
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        project: [server, client]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: |
+          cd ${{ matrix.project }}
+          npm install
+      - name: Run lint
+        run: |
+          cd ${{ matrix.project }}
+          npm run lint
+
+  build-and-push:
+    name: Build images and update infra
+    needs: lint
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      REGISTRY: docker.io
+      IMAGE_NAMESPACE: ${{ secrets.DOCKERHUB_USERNAME }}
+      IMAGE_TAG: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build and push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./server
+          file: ./server/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/task-backend:${{ env.IMAGE_TAG }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/task-backend:latest
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./client
+          file: ./client/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/task-frontend:${{ env.IMAGE_TAG }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/task-frontend:latest
+      - name: Build and push worker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./worker
+          file: ./worker/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/task-worker:${{ env.IMAGE_TAG }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/task-worker:latest
+      - name: Update infra image tags
+        run: |
+          for file in infra/*deployment.yaml; do
+            sed -i "s#docker.io/your-dockerhub-username/task-backend:.*#docker.io/${{ env.IMAGE_NAMESPACE }}/task-backend:${{ env.IMAGE_TAG }}#g" "$file"
+            sed -i "s#docker.io/your-dockerhub-username/task-frontend:.*#docker.io/${{ env.IMAGE_NAMESPACE }}/task-frontend:${{ env.IMAGE_TAG }}#g" "$file"
+            sed -i "s#docker.io/your-dockerhub-username/task-worker:.*#docker.io/${{ env.IMAGE_NAMESPACE }}/task-worker:${{ env.IMAGE_TAG }}#g" "$file"
+          done
+      - name: Commit infra updates
+        uses: stefanzweifel/git-auto-commit-action@v6
+        with:
+          commit_message: 'ci: update infra image tags to ${{ env.IMAGE_TAG }}'
+          branch: main
+          file_pattern: 'infra/*deployment.yaml'
